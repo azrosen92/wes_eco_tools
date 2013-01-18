@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+<title>Eco Tools Dynamic Map</title>
+<style type="text/css">
+	html { height: 100%; }
+	body { height: 100%; margin: 0; padding: 0 }
+	#map_canvas { height: 100% }
+</style>
+
+<link href="http://ajax.googleapis.com/ajax/libs/jqueryui/1.8/themes/base/jquery-ui.css" 
+	rel="stylesheet" type="text/css"/>
+<script src="http://ajax.googleapis.com/ajax/libs/jquery/1.5/jquery.min.js"></script>
+<script src="http://ajax.googleapis.com/ajax/libs/jqueryui/1.8/jquery-ui.min.js"></script>
+<style type="text/css">
+    #slider { margin: 10px; }
+</style>
+
+<script type="text/javascript"
+	src="http://maps.googleapis.com/maps/api/js?key=AIzaSyD5RH24r_AlfCOLFV7BQ6gZoFCPNApA94Y&sensor=false">
+</script>
+<script type="text/javascript">
+
+    var queryUrlHead = 'http://www.google.com/fusiontables/api/query?sql=';
+    var queryUrlTail = '&jsonCallBack=?';
+    var finalMap_tableid = '1ZhE_f12VDQ5zr82cbftVn1Jpff_TK5ZQmC3h52Y';//finalMap.kml
+	 var masterEnergyTable_tableid = '145TOXaanydD63tvgVMmCVH0hei0NXNCEK8ekZBg';
+	 
+    var query = "SELECT COUNT() FROM " + finalMap_tableid;
+    var numberOfRows = 10;
+	 var apiKey = 'AIzaSyD5RH24r_AlfCOLFV7BQ6gZoFCPNApA94Y';   
+
+    var map;
+    var slider;
+    var firstYear = 0;
+    var lastYear = numberOfRows;
+    var layer;
+
+	var currDate = new Date();
+	var month = currDate.getMonth() + 1;
+	var year = currDate.getFullYear();
+
+	var current_date = month + '-' + year;
+
+	var polygonArray = [];
+	
+
+	/*
+	*
+	*	========== INITIALZE PAGE ============
+	* 	perform initial query of fusion table, draw polygons onto the map with their
+	*	initial colors
+	*
+	*/
+    function initialize() {
+			var query = "SELECT name, geometry FROM " + finalMap_tableid;
+			var encodedQuery = encodeURIComponent(query);
+			var energy_query_array = [];
+ 
+			//construct the url
+			var url = ['https://www.googleapis.com/fusiontables/v1/query'];
+			url.push('?sql=' + encodedQuery);
+			url.push('&key=' + apiKey);
+			url.push('&callback=?'); 
+
+	      $("#amount").val(current_date);
+			
+			/*
+			*
+			* ============== INITIAL SHAPE QUERY =================
+			*
+			*/
+			//send the JSONP request using jQuery
+			$.ajax({
+				url: url.join(''),
+				dataType: 'jsonp',
+				success: function(data) {
+								//fill array of polygons
+								var rowsArray = data['rows'];
+								for(var i = 0; i < rowsArray.length; i++) {
+									var currentArray = rowsArray[i];
+									var name = currentArray[0];
+									var geoData = currentArray[1]['geometry']['coordinates'][0];
+									var coordinateArray = [];
+
+									//fill array of coordinates for each polygon
+									for(var j = 0; j < geoData.length; j++) {
+										var latLng = new google.maps.LatLng(geoData[j][1], geoData[j][0]);
+										coordinateArray.push(latLng);
+									}
+
+									//construct a polygon with new array of coordinates (coordinateArray)
+									var newPolygon = new google.maps.Polygon({ paths: coordinateArray });
+
+									//add polygon to polygonArray
+									polygonArray[i] = [name, newPolygon];
+									
+								}
+
+								var mapOptions = {
+	    							center: new google.maps.LatLng(41.558, -72.651),
+	      						zoom: 16,
+	    							mapTypeId: google.maps.MapTypeId.ROADMAP
+	    						};
+       						map = new google.maps.Map(document.getElementById("map_canvas"), 
+				    								mapOptions);
+
+								//query for row from energy usage table based on current month
+								//fill array that maps building name to energy usage number
+																
+								var energy_query = 'SELECT * FROM ' + masterEnergyTable_tableid 
+												+ " WHERE Date = '" + current_date + "'";
+								var encoded_energy_query = encodeURIComponent(energy_query);
+								var energy_url = ['https://www.googleapis.com/fusiontables/v1/query'];
+								energy_url.push('?sql=' + encoded_energy_query);
+								energy_url.push('&key=' + apiKey);
+	
+								/*
+								*
+								* ============= COLOR QUERY ===============
+								*	
+								*/
+								$.ajax({
+									url: energy_url.join(''),
+									dataType: 'jsonp',
+									success: function(data) {
+													var name_array = data['columns'];
+													console.log(data);
+													var data_array = data['rows'][0];
+													for(var i = 1; i < data['columns'].length; i++) {
+														energy_query_array[name_array[i]] = data_array[i];
+													}
+													for (var i = 0; i < polygonArray.length; i++) {
+														var poly = polygonArray[i][1];
+														var name = polygonArray[i][0];
+            										poly.setMap(map);
+														//change color
+														if(energy_query_array[name]) {
+															var color = numberToColor(energy_query_array[name]);
+															console.log(color);
+															poly.setOptions({
+																strokeColor: color,
+																strokeWeight: 0.5,
+																fillColor: color,
+																fillOpacity: 0.35
+															});
+														} else {
+															poly.setOptions({
+																strokeWeight: 0,
+																fillOpacity: 0
+															});
+														}
+        											}
+
+										
+												}
+										});
+
+							}
+					});
+    }
+
+	/*
+	*
+	*	=========== SLIDER ===========
+	*
+	*/
+    $(function() {
+	    $("#slider").slider({
+	        orientation: "horizontal",
+	        min: firstYear,
+	        max: 200,
+	        value: dateToNumber(current_date),
+            slide: function(event, ui) {
+					var monthYear = numberToDate(ui.value);
+	            $("#amount").val(monthYear);
+	        },
+	        change: function(event, ui) {
+	            changeColor(ui.value);	
+	        }
+        });
+
+	    $("#amount").val($("#slider").slider("value"));
+     });
+	
+	
+    function changeColor(value) {
+		var newDate = numberToDate(value);
+
+		var energy_query = 'SELECT * FROM ' + masterEnergyTable_tableid 
+						+ " WHERE Date = '" + newDate + "'";
+		var encoded_energy_query = encodeURIComponent(energy_query);
+		var energy_url = ['https://www.googleapis.com/fusiontables/v1/query'];
+		energy_url.push('?sql=' + encoded_energy_query);
+		energy_url.push('&key=' + apiKey);
+
+		$.ajax({
+			url: energy_url.join(''),
+			dataType: 'jsonp',
+			success: function(data) {
+				var name_array = data['columns'];
+				console.log(data);
+				var data_array = data['rows'][0];
+				var energy_query_array = [];
+				for(var i = 1; i < data['columns'].length; i++) {
+					energy_query_array[name_array[i]] = data_array[i];
+				}
+				for (var i = 0; i < polygonArray.length; i++) {
+					var poly = polygonArray[i][1];
+					var name = polygonArray[i][0];
+            	poly.setMap(map);
+					//change color
+					if(energy_query_array[name]) {
+						var color = numberToColor(energy_query_array[name]);
+						poly.setOptions({
+							strokeColor: color,
+							strokeWeight: 0.5,
+							fillColor: color,
+							fillOpacity: 0.35
+						});
+					} else {
+						poly.setOptions({
+							strokeWeight: 0,
+							fillOpacity: 0
+						});
+					}
+        		}
+			}
+			
+		});
+    }
+	
+
+	//given a number from 0 to 50
+	//return a hex representation of a color where 0 is greenest, 50 is reddest
+	function numberToColor(num) {
+
+		var MAX_VALUE = 50;
+		var start_triplet = [0, 255, 0];
+		var end_triplet = [255, 0, 0];
+
+		var rgb_triplet_to_display = transition3(num, MAX_VALUE, start_triplet, end_triplet);
+		var red = Math.floor(rgb_triplet_to_display[0]);
+		var green = Math.floor(rgb_triplet_to_display[1]);
+		var blue = Math.floor(rgb_triplet_to_display[2]);
+		var color = intToHex(red.toString(16), green.toString(16), blue.toString(16));
+		return color;
+
+		var MAX_VALUE = 30;
+		var start_triplet = rgb_to_hsv([0, 255, 0]); //green
+		var end_triplet = rgb_to_hsv([255, 0, 0]); //red
+
+		//calculation to turn number to color
+		var rgb_triplet_to_display = hsv_to_rgb(transition3(num, MAX_VALUE, start_triplet, end_triplet));
+		var red = rgb_triplet_to_display[0].toString(16);
+		var green = rgb_triplet_to_display[1].toString(16);
+		var blue = rgb_triplet_to_display[2].toString(16);	
+		var color = intToHex(red, green, blue);
+		return color;
+	}
+
+	function intToHex(r,g,b) {
+		return "#".concat(r+'', g+'', '00');
+	}
+
+	//given a date in mm-yyyy format return a number 
+	//where 01-2000 is 0 up to the most recent date
+	function dateToNumber(current_date) {
+		var currentMonth = parseInt(current_date.substring(0, 2));
+		var startMonth = 1;
+		var currentYear = parseInt(current_date.substring(3));
+		var startYear = 2000;
+
+		var numOfMonths = 0;
+
+		while(currentYear >= startYear) {
+			while(currentMonth > 0) {
+				numOfMonths++;
+				currentMonth--;
+			}
+			currentMonth = 12;
+			numOfMonths++;
+			currentYear--;
+		}
+		
+		return numOfMonths;
+	}
+
+	//given a number where 0 is 01-2000 to the current date
+	//return a date in the form mm-yyyy	
+	function numberToDate(num) {
+		var startYear = 2000;
+		var startMonth = 1;
+
+		while(num >= 12) {
+			num -= 12;
+			startYear++;
+		}
+		var month = startMonth + num;		
+		if(num < 9) {
+			month = '0' + month;
+		}
+		return month + '-' + startYear;
+	}
+
+	/*
+	*
+	*	============= COLOR GRADIENT FUNCTIONS ==================
+	*
+	*/
+	//value: energy usage value
+	//maximum: maximum energy usage
+	//start_point: rgb(green) : int
+	//end_point: rgb(red) : int
+	function transition(value, maximum, start_point, end_point) {
+		return start_point + (end_point - start_point)*value/maximum;
+	}	
+
+	//s: rgb(green) : int[]
+	//e: rgb(red) : int[]
+	function transition3(value, maximum, s, e) {
+		var r = [];
+		r[0] = transition(value, maximum, s[0], e[0]);
+		r[1] = transition(value, maximum, s[1], e[1]);
+		r[2] = 0;
+		return r;
+	}
+
+	//rgb: int[] : {r, g, b}
+	function rgb_to_hsv(rgb) {
+		var r = rgb[0]/255;
+		var g = rgb[1]/255;
+		var b = rgb[2]/255;
+
+		var max = Math.max(r, g, b);
+		var min = Math.min(r, g, b);
+		var h, s, v = max;
+
+		var d = max - min;
+		s = max == 0 ? 0 : d / max;
+
+		if(max == min) {
+			h = 0;
+		} else {
+			switch(max) {
+				case r: h = (g-b) / d + (g < b ? 6 : 0); break;
+				case g: h = (b-r) / d + 2; break;
+				case b: h = (r-g) / d + 4; break;
+			}
+			h = h / 6;
+		}
+		
+		return [h, s, v];
+	}
+
+	//hsv: int[] : {h, s, v}
+	function hsv_to_rgb(hsv) {
+		var h = hsv[0];
+		var s = hsv[1];
+		var v = hsv[2];
+
+		var r, g, b;
+
+		var i = Math.floor(h * 6);
+		var f = h * 6 - i;
+		var p = v * (1 - s);
+		var q = v * (1 - f * s);
+		var t = v * (1 - (1 - f) * s);
+
+		switch(i % 6) {
+			case 0: r = v, g = t, b = p; break;
+        	case 1: r = q, g = v, b = p; break;
+        	case 2: r = p, g = v, b = t; break;
+        	case 3: r = p, g = q, b = v; break;
+        	case 4: r = t, g = p, b = v; break;
+        	case 5: r = v, g = p, b = q; break;
+		}
+
+	 	return [r * 255, g * 255, b * 255];		
+
+	}
+
+</script>
+</head>
+
+<body onload="initialize()">
+<div id="slider" style="width:65%;"></div>
+<div>
+	<label for="amount">Year:</label>
+	<input type="text" id="amount" style="border:0; font-weight:bold;" />
+</div>
+<div id="map_canvas" style="width:65%;"></div>
+
+</body>
+
+
+</html>
